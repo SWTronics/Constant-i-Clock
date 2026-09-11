@@ -1,217 +1,112 @@
 // Two daisy-chained STP16CPC26
 // Countdown timer
+#include "definitions.h"
+#include <Arduino.h> // Allows you to use standard Arduino functions like digitalWrite or delay
 
-
-const int datPin = 0;  // SDI (to first/upstream chip)
-const int sckPin = 1;  // SCK (shared)
-const int latPin = 3;  // LAT (shared)
-const int enPin  = 4;  // EN (shared, active LOW)
 
 
 // ============================================================
-// TIMER CONFIGURATION
+//  FUNCTIONS
+// ============================================================
+void shiftOutBits(uint16_t data);
+void latch();
+void showTwoDigits(uint16_t tensPattern, uint16_t onesPattern);
+void showNumber(int number);
+unsigned long getTimerInterval();
+void flashZero();
+void primaryOperation();
+
+// ============================================================
+//  VARIABLES
 // ============================================================
 
-// Choose one:
-// SECONDS
-// MINUTES
-// HOURS
-
-enum TimerMode {
-  SECONDS,
-  MINUTES,
-  HOURS
-};
+//timer
+unsigned long lastTimerUpdate = 0;
+unsigned long lastFlash = 0;
+bool timerFinished = false;
+bool flashState = true;
+unsigned long timerInterval;
 
 TimerMode timerMode = MINUTES;
 
 // Starting timer value
 int timerValue = 5;
 
+//State Machine
+static system_state_t currentState = STATE_INIT;
 
 // ============================================================
-// DIGIT PATTERNS
+// main
 // ============================================================
 
-const uint16_t digits[10] = {
-  (1<<15)|(1<<14)|(1<<13)|(1<<12)|(1<<8)|(1<<9)|(1<<10)|(1<<7)|(1<<4)|(1<<5)|(1<<6)|(1<<0)|(1<<1)|(1<<2), // 0
-  (1<<14)|(1<<13)|(1<<12)|(1<<8)|(1<<9)|(1<<10), // 1
-  (1<<15)|(1<<14)|(1<<13)|(1<<12)|(1<<3)|(1<<11)|(1<<4)|(1<<5)|(1<<6)|(1<<7)|(1<<0)|(1<<9), // 2
-  (1<<15)|(1<<14)|(1<<13)|(1<<12)|(1<<3)|(1<<11)|(1<<8)|(1<<9)|(1<<10)|(1<<7)|(1<<0)|(1<<6), // 3
-  (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<11)|(1<<14)|(1<<13)|(1<<12)|(1<<8)|(1<<9)|(1<<10), // 4
-  (1<<15)|(1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<11)|(1<<8)|(1<<9)|(1<<10)|(1<<7)|(1<<14)|(1<<6), // 5
-  (1<<15)|(1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<11)|(1<<4)|(1<<5)|(1<<6)|(1<<7)|(1<<8)|(1<<9)|(1<<10)|(1<<14), // 6
-  (1<<15)|(1<<14)|(1<<13)|(1<<12)|(1<<8)|(1<<9)|(1<<10)|(1<<0)|(1<<11), // 7
-  (1<<15)|(1<<14)|(1<<13)|(1<<12)|(1<<8)|(1<<9)|(1<<10)|(1<<7)|(1<<4)|(1<<5)|(1<<6)|(1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<11), // 8
-  (1<<15)|(1<<14)|(1<<13)|(1<<12)|(1<<3)|(1<<11)|(1<<0)|(1<<1)|(1<<2)|(1<<8)|(1<<9)|(1<<10)|(1<<7) // 9
-};
-
-
-// ============================================================
-// ORIGINAL DISPLAY CODE
-// ============================================================
-
-void shiftOutBits(uint16_t data) {
-
-  for (int i = 15; i >= 0; i--) {
-
-    digitalWrite(sckPin, LOW);
-
-    digitalWrite(datPin, (data >> i) & 0x01);
-
-    delayMicroseconds(2);
-
-    digitalWrite(sckPin, HIGH);
-
-    delayMicroseconds(2);
-  }
-
-  digitalWrite(sckPin, LOW);
+void setup(){
+  //required by arduino
 }
+void loop(){
+         switch (currentState)
+        {
+            case STATE_INIT:
+            {
+   
+                pinMode(DATA_PIN, OUTPUT);
+                pinMode(SCK_PIN, OUTPUT);
+                pinMode(LAT_PIN, OUTPUT);
+                pinMode(ENABLE_PIN, OUTPUT);
+
+                digitalWrite(SCK_PIN, LOW);
+                digitalWrite(LAT_PIN, LOW);
+
+                // Blank while initializing
+                digitalWrite(ENABLE_PIN, HIGH);
+
+                showNumber(timerValue);
+
+                // Enable outputs
+                digitalWrite(ENABLE_PIN, LOW);
+
+                //Button Configuration
+                pinMode(BUTTON_PIN, INPUT_PULLUP);
+                // Start timer NOW
+                lastTimerUpdate = millis();
+
+                timerInterval = getTimerInterval();
+                currentState = STATE_PRE_RUN;
+                // Proceed to system validation
+                break;
+            }
 
 
-void latch() {
+            case STATE_PRE_RUN:
+            {
+                // Final hardware configuration before entering runtime mode
+                currentState = STATE_RUN;
+                // Enter normal operating mode
+                break;
+            }
 
-  digitalWrite(latPin, LOW);
+            case STATE_RUN:
+            {
+                primaryOperation();
+                break;
+            }
 
-  delayMicroseconds(2);
+            case STATE_FINISH:
+            {
 
-  digitalWrite(latPin, HIGH);
+                break;
+            }
 
-  delayMicroseconds(2);
-
-  digitalWrite(latPin, LOW);
-}
-
-
-void showTwoDigits(uint16_t tensPattern, uint16_t onesPattern) {
-
-  shiftOutBits(tensPattern);  // sent first -> downstream chip
-  shiftOutBits(onesPattern);  // sent second -> upstream chip
-
-  latch();
-}
-
-
-// ============================================================
-// DISPLAY NUMBER
-// ============================================================
-
-void showNumber(int number) {
-
-  if (number < 0)
-    number = 0;
-
-  if (number > 99)
-    number = 99;
-
-  int tens = number / 10;
-  int ones = number % 10;
-
-
-  showTwoDigits(digits[ones], digits[tens]);
-}
-
-
-// ============================================================
-// TIMER INTERVAL
-// ============================================================
-
-unsigned long timerInterval;
-
-unsigned long getTimerInterval() {
-
-  switch (timerMode) {
-
-    case SECONDS:
-      return 1000UL;
-
-    case MINUTES:
-      return 60000UL;
-
-    case HOURS:
-      return 3600000UL;
-  }
-
-  return 1000UL;
-}
-
-
-// ============================================================
-// TIMER VARIABLES
-// ============================================================
-
-unsigned long lastTimerUpdate = 0;
-
-unsigned long lastFlash = 0;
-
-bool timerFinished = false;
-bool flashState = true;
-
-// ============================================================
-// FLASH ZERO
-// ============================================================
-
-void flashZero() {
-
-  static unsigned long lastFlash = 0;
-  static bool flashState = false;
-
-  if (millis() - lastFlash >= 500) {
-
-    lastFlash = millis();
-
-    flashState = !flashState;
-
-    if (flashState) {
-
-      // Display 00
-      digitalWrite(enPin, LOW);
-      showNumber(0);
-
-    } else {
-
-      // Turn display off
-      digitalWrite(enPin, HIGH);
+            default:
+            {
+                currentState = STATE_PRE_RUN;
+                break;
+            }
+        }
     }
-  }
-}
 
 
-// ============================================================
-// SETUP
-// ============================================================
 
-void setup() {
-
-  pinMode(datPin, OUTPUT);
-  pinMode(sckPin, OUTPUT);
-  pinMode(latPin, OUTPUT);
-  pinMode(enPin, OUTPUT);
-
-  digitalWrite(sckPin, LOW);
-  digitalWrite(latPin, LOW);
-
-  // Blank while initializing
-  digitalWrite(enPin, HIGH);
-
-  showNumber(timerValue);
-
-  // Enable outputs
-  digitalWrite(enPin, LOW);
-
-  // Start timer NOW
-  lastTimerUpdate = millis();
-
-  timerInterval = getTimerInterval();
-}
-
-
-// ============================================================
-// LOOP
-// ============================================================
-
-void loop() {
+void primaryOperation() {
 
   // ----------------------------------------------------------
   // TIMER HAS FINISHED
@@ -261,3 +156,108 @@ void loop() {
     }
   }
 }
+
+
+void shiftOutBits(uint16_t data) {
+
+  for (int i = 15; i >= 0; i--) {
+
+    digitalWrite(SCK_PIN, LOW);
+
+    digitalWrite(DATA_PIN, (data >> i) & 0x01);
+
+    delayMicroseconds(2);
+
+    digitalWrite(SCK_PIN, HIGH);
+
+    delayMicroseconds(2);
+  }
+
+  digitalWrite(SCK_PIN, LOW);
+}
+
+
+void latch() {
+
+  digitalWrite(LAT_PIN, LOW);
+
+  delayMicroseconds(2);
+
+  digitalWrite(LAT_PIN, HIGH);
+
+  delayMicroseconds(2);
+
+  digitalWrite(LAT_PIN, LOW);
+}
+
+
+void showTwoDigits(uint16_t tensPattern, uint16_t onesPattern) {
+
+  shiftOutBits(tensPattern);  // sent first -> downstream chip
+  shiftOutBits(onesPattern);  // sent second -> upstream chip
+
+  latch();
+}
+
+
+
+void showNumber(int number) {
+
+  if (number < 0)
+    number = 0;
+
+  if (number > 99)
+    number = 99;
+
+  int tens = number / 10;
+  int ones = number % 10;
+
+
+  showTwoDigits(DIGITS[ones], DIGITS[tens]);
+}
+
+
+
+unsigned long getTimerInterval() {
+
+  switch (timerMode) {
+
+    case SECONDS:
+      return 1000UL;
+
+    case MINUTES:
+      return 60000UL;
+
+    case HOURS:
+      return 3600000UL;
+  }
+
+  return 1000UL;
+}
+
+void flashZero() {
+
+  static unsigned long lastFlash = 0;
+  static bool flashState = false;
+
+  if (millis() - lastFlash >= 500) {
+
+    lastFlash = millis();
+
+    flashState = !flashState;
+
+    if (flashState) {
+
+      // Display 00
+      digitalWrite(ENABLE_PIN, LOW);
+      showNumber(0);
+
+    } else {
+
+      // Turn display off
+      digitalWrite(ENABLE_PIN, HIGH);
+    }
+  }
+}
+
+
