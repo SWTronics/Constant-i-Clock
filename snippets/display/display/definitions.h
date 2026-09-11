@@ -9,6 +9,7 @@ typedef enum
     STATE_INIT,
     STATE_SELF_TEST,
     STATE_PRE_RUN,
+    STATE_START_ANIMATION,
     STATE_RUN,
     STATE_FINISH
 } system_state_t;
