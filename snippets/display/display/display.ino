@@ -23,14 +23,17 @@ void primaryOperation();
 //timer
 unsigned long lastTimerUpdate = 0;
 unsigned long lastFlash = 0;
-bool timerFinished = false;
+static volatile bool timerFinished = false;
 bool flashState = true;
 unsigned long timerInterval;
 
-TimerMode timerMode = MINUTES;
+TimerMode timerMode = SECONDS;
 
 // Starting timer value
-int timerValue = 5;
+int timerValue = 10;
+
+//button related
+int lastButtonState = HIGH; 
 
 //State Machine
 static system_state_t currentState = STATE_INIT;
@@ -47,7 +50,10 @@ void loop(){
         {
             case STATE_INIT:
             {
-   
+                //reset variables
+                timerFinished = false;
+                timerValue = 10;
+
                 pinMode(DATA_PIN, OUTPUT);
                 pinMode(SCK_PIN, OUTPUT);
                 pinMode(LAT_PIN, OUTPUT);
@@ -87,18 +93,43 @@ void loop(){
             case STATE_RUN:
             {
                 primaryOperation();
+
+                //Check if timer is finished
+                if (timerValue == 0) { 
+                  currentState = STATE_FINISH;
+                }
                 break;
             }
 
             case STATE_FINISH:
             {
+                int currentButtonState = digitalRead(BUTTON_PIN);
+
+                // Detect a new button press (HIGH -> LOW)
+                if (lastButtonState == HIGH && currentButtonState == LOW)
+                {
+                    //Button was pressed
+                    currentState = STATE_INIT;
+
+                    // Reset button state
+                    lastButtonState = currentButtonState;
+                }
+                else
+                {
+                    // Button has NOT been newly pressed
+                    // Keep flashing 00
+                    flashZero();
+
+                    lastButtonState = currentButtonState;
+                }
 
                 break;
             }
 
+
             default:
             {
-                currentState = STATE_PRE_RUN;
+                currentState = STATE_INIT;
                 break;
             }
         }
@@ -137,22 +168,6 @@ void primaryOperation() {
       timerValue--;
 
       showNumber(timerValue);
-    }
-
-
-    // --------------------------------------------------------
-    // TIMER REACHED ZERO
-    // --------------------------------------------------------
-
-    if (timerValue == 0) {
-
-      timerFinished = true;
-
-      // Immediately show 00
-      showNumber(0);
-
-      // Begin flashing
-      lastFlash = millis();
     }
   }
 }
